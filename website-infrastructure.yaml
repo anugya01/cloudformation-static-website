@@ -1,0 +1,95 @@
+
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: S3 and CloudFront infrastructure for static website
+
+Resources:
+
+  # 1. S3 bucket to store website files
+  WebsiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
+  # 2. CloudFront Origin Access Control
+  WebsiteOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: WebsiteOAC
+        Description: Allow CloudFront to access private S3 bucket
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # 3. CloudFront distribution
+  WebsiteDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: Static website distribution
+        DefaultRootObject: index.html
+
+        Origins:
+          - Id: S3WebsiteOrigin
+            DomainName: !GetAtt WebsiteBucket.RegionalDomainName
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+            OriginAccessControlId: !GetAtt WebsiteOAC.Id
+
+        DefaultCacheBehavior:
+          TargetOriginId: S3WebsiteOrigin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+
+        PriceClass: PriceClass_100
+
+  # 4. Allow CloudFront to read S3 objects
+  WebsiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebsiteBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontRead
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${WebsiteBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub
+                  "arn:aws:cloudfront::${AWS::AccountId}:distribution/${WebsiteDistribution}"
+
+Outputs:
+
+  WebsiteBucketName:
+    Description: S3 bucket name
+    Value: !Ref WebsiteBucket
+
+  CloudFrontDistributionID:
+    Description: CloudFront distribution ID
+    Value: !Ref WebsiteDistribution
+
+  WebsiteURL:
+    Description: Website URL
+    Value: !Sub
+      "https://${WebsiteDistribution.DomainName}"
+
